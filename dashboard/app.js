@@ -149,8 +149,7 @@ function renderTable(data, resetPage = true) {
                 <td>${item.ciudad}</td>
                 <td>${item.nivel}</td>
                 <td>
-                    <span class="tag ${riskClass}">${riesgoTexto}</span><br>
-                    <small style="color:#777;margin-top:4px;display:inline-block">${item.tipo}</small>
+                    <span class="tag ${riskClass}">${riesgoTexto}</span>
                 </td>
                 <td><div style="max-width:350px;line-height:1.4;">${item.razon}</div></td>
             </tr>`;
