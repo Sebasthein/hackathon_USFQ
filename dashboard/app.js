@@ -95,7 +95,7 @@ allData.sort((a, b) => {
     return d !== 0 ? d : b.prob - a.prob;
 });
 
-let activeFilters = { nivel: 'all', negocio: 'all', riesgo: 'all', ciudad: 'all' };
+let activeFilters = { nivel: 'all', negocio: 'all', riesgo: 'all', ciudad: 'all', quintil: 'all' };
 let chartInst1 = null, chartInst2 = null;
 let currentPage = 1;
 const itemsPerPage = 8;
@@ -128,7 +128,7 @@ function renderTable(data, resetPage = true) {
     tbody.innerHTML = '';
 
     if (!data.length) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">No se encontraron comercios con esos filtros</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">No se encontraron comercios con esos filtros</td></tr>`;
         document.getElementById('results-count').innerText = 'Mostrando 0 comercios';
         renderPagination(0, 0);
         return;
@@ -152,8 +152,7 @@ function renderTable(data, resetPage = true) {
                     <span class="tag ${riskClass}">${riesgoTexto}</span><br>
                     <small style="color:#777;margin-top:4px;display:inline-block">${item.tipo}</small>
                 </td>
-                <td><button class="action-btn">${item.accion}</button></td>
-                <td><div style="max-width:250px;line-height:1.4;">${item.razon}</div></td>
+                <td><div style="max-width:350px;line-height:1.4;">${item.razon}</div></td>
             </tr>`;
     });
 
@@ -183,12 +182,15 @@ window.goToPage = (page) => { currentPage = page; applyFilters(false); };
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 function applyFilters(resetPage = true) {
-    const filtered = allData.filter(item =>
-        (activeFilters.nivel === 'all' || item.nivel === activeFilters.nivel) &&
-        (activeFilters.negocio === 'all' || item.tipo === activeFilters.negocio) &&
-        (activeFilters.riesgo === 'all' || item.riesgo === activeFilters.riesgo) &&
-        (activeFilters.ciudad === 'all' || item.ciudad === activeFilters.ciudad)
-    );
+    const filtered = allData.filter(item => {
+        let matchRiesgo = activeFilters.riesgo === 'all' || item.riesgo === activeFilters.riesgo || (activeFilters.riesgo === 'Alto' && item.riesgo.startsWith('Alto'));
+        
+        return (activeFilters.nivel === 'all' || item.nivel === activeFilters.nivel) &&
+               (activeFilters.negocio === 'all' || item.tipo === activeFilters.negocio) &&
+               matchRiesgo &&
+               (activeFilters.ciudad === 'all' || item.ciudad === activeFilters.ciudad) &&
+               (activeFilters.quintil === 'all' || item.quintil === activeFilters.quintil);
+    });
 
     updateKPIs(filtered);
     updateCharts(filtered);
@@ -231,8 +233,33 @@ function getQuejasByTipo(data) {
 }
 
 function updateCharts(data) {
-    if (chartInst1) chartInst1.data.datasets[0].data = getQuintilData(data);
-    if (chartInst2) chartInst2.data.datasets[0].data = getQuejasByTipo(data);
+    if (chartInst1) {
+        // Ignorar su propio filtro para no colapsar la barra a un solo elemento al dar click
+        const barData = allData.filter(item => {
+            let mRiesgo = activeFilters.riesgo === 'all' || item.riesgo === activeFilters.riesgo || (activeFilters.riesgo === 'Alto' && item.riesgo.startsWith('Alto'));
+            return (activeFilters.nivel === 'all' || item.nivel === activeFilters.nivel) &&
+                   (activeFilters.negocio === 'all' || item.tipo === activeFilters.negocio) &&
+                   mRiesgo &&
+                   (activeFilters.ciudad === 'all' || item.ciudad === activeFilters.ciudad);
+        });
+        chartInst1.data.datasets[0].data = getQuintilData(barData);
+        chartInst1.update();
+    }
+    
+    if (chartInst2) {
+        // El pastel recalcula sus tamaños dinámicamente según los demás filtros (ej: Región/Ciudad),
+        // pero IGNORA su propio filtro de 'negocio' para evitar llenarse 100% de esa sección al darle clic.
+        const pieData = allData.filter(item => {
+            let mRiesgo = activeFilters.riesgo === 'all' || item.riesgo === activeFilters.riesgo || (activeFilters.riesgo === 'Alto' && item.riesgo.startsWith('Alto'));
+            return (activeFilters.nivel === 'all' || item.nivel === activeFilters.nivel) &&
+                   mRiesgo &&
+                   (activeFilters.ciudad === 'all' || item.ciudad === activeFilters.ciudad) &&
+                   (activeFilters.quintil === 'all' || item.quintil === activeFilters.quintil);
+        });
+        
+        chartInst2.data.datasets[0].data = getQuejasByTipo(pieData);
+        chartInst2.update(); // Fuerza repintar para aplicar proporciones y la lógica visual de opacidad
+    }
 }
 
 function initCharts() {
@@ -246,7 +273,12 @@ function initCharts() {
             datasets: [{
                 label: 'Gasto Promedio ($)',
                 data: [0, 0, 0, 0, 0],
-                backgroundColor: ['#3a285c', '#57447d', '#7a5fa0', '#9e84c0', '#c4aadf'],
+                backgroundColor: (context) => {
+                    const baseColors = ['#3a285c', '#57447d', '#7a5fa0', '#9e84c0', '#c4aadf'];
+                    if (activeFilters.quintil === 'all') return baseColors[context.dataIndex];
+                    const labels = ['Quintil 1', 'Quintil 2', 'Quintil 3', 'Quintil 4', 'Quintil 5'];
+                    return labels[context.dataIndex] === activeFilters.quintil ? '#00c49a' : '#cecece';
+                },
                 borderRadius: 4
             }]
         },
@@ -255,7 +287,19 @@ function initCharts() {
             responsive: true,
             maintainAspectRatio: false,
             plugins: { legend: { display: false } },
-            scales: { x: { grid: { display: false } }, y: { grid: { display: false } } }
+            scales: { x: { grid: { display: false } }, y: { grid: { display: false } } },
+            onHover: (event, chartElement) => {
+                event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default';
+            },
+            onClick: (_event, elements) => {
+                if (!elements.length) return;
+                const labels = ['Quintil 1', 'Quintil 2', 'Quintil 3', 'Quintil 4', 'Quintil 5'];
+                const clicked = labels[elements[0].index];
+                
+                // Toggle logica
+                activeFilters.quintil = activeFilters.quintil === clicked ? 'all' : clicked;
+                applyFilters();
+            }
         }
     });
 
@@ -265,7 +309,11 @@ function initCharts() {
             labels: CHART_TIPOS,
             datasets: [{
                 data: CHART_TIPOS.map(() => 0),
-                backgroundColor: ['#3a285c', '#57447d', '#00c49a', '#5bc483', '#a7a7a7'],
+                backgroundColor: (context) => {
+                    const baseColors = ['#3a285c', '#57447d', '#00c49a', '#5bc483', '#a7a7a7'];
+                    if (activeFilters.negocio === 'all') return baseColors[context.dataIndex];
+                    return CHART_TIPOS[context.dataIndex] === activeFilters.negocio ? baseColors[context.dataIndex] : '#cecece';
+                },
                 borderWidth: 1,
                 borderColor: '#ffffff'
             }]
