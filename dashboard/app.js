@@ -139,7 +139,9 @@ function renderTable(data, resetPage = true) {
     const slice = data.slice(startIdx, startIdx + itemsPerPage);
 
     slice.forEach(item => {
-        const riesgoTexto = item.riesgo.replace('_', ' – ');
+        // Reducimos el texto visual solo a su escala semántica (Alto, Medio, Bajo)
+        const riesgoTexto = item.riesgo.startsWith('Alto') ? 'Alto' : item.riesgo;
+        
         const riskClass = item.riesgo.startsWith('Alto') ? 'alto' : (item.riesgo === 'Medio' ? 'medio' : 'bajo');
         const probPct = Math.round(item.prob * 100);
         tbody.innerHTML += `
@@ -357,6 +359,9 @@ function updateMapMarkers(data) {
         if (isNaN(item.lat) || isNaN(item.lng)) return;
         const isHigh = item.riesgo.startsWith('Alto');
         const color = isHigh ? '#e53e3e' : (item.riesgo === 'Medio' ? '#d69e2e' : '#00c49a');
+        
+        const mapTooltipRiesgo = isHigh ? 'Alto' : item.riesgo;
+        
         const marker = L.circleMarker([item.lat, item.lng], {
             radius: isHigh ? 5 : 3,
             fillColor: color,
@@ -364,7 +369,7 @@ function updateMapMarkers(data) {
             weight: 0.5,
             fillOpacity: 0.8
         }).bindTooltip(
-            `<strong>${item.nombre}</strong><br>${item.ciudad} · ${Math.round(item.prob*100)}% prob.<br>${item.riesgo.replace('_',' ')}`,
+            `<strong>${item.nombre}</strong><br>${item.ciudad} · ${Math.round(item.prob*100)}% prob.<br>Riesgo: ${mapTooltipRiesgo}`,
             { direction: 'top' }
         );
         marker.addTo(mapInstance);
