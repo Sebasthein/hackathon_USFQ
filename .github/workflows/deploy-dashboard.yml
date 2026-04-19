@@ -1,0 +1,55 @@
+name: Deploy Dashboard to Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard/index.html'
+      - 'dashboard/style.css'
+      - 'dashboard/app.js'
+      - 'dashboard/data.js'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload dashboard files to Azure Blob Storage
+        env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: |
+          az storage blob upload \
+            --connection-string "$AZURE_STORAGE_CONNECTION_STRING" \
+            --container-name '$web' \
+            --file dashboard/index.html \
+            --name index.html \
+            --content-type text/html \
+            --overwrite
+
+          az storage blob upload \
+            --connection-string "$AZURE_STORAGE_CONNECTION_STRING" \
+            --container-name '$web' \
+            --file dashboard/style.css \
+            --name style.css \
+            --content-type text/css \
+            --overwrite
+
+          az storage blob upload \
+            --connection-string "$AZURE_STORAGE_CONNECTION_STRING" \
+            --container-name '$web' \
+            --file dashboard/app.js \
+            --name app.js \
+            --content-type application/javascript \
+            --overwrite
+
+          az storage blob upload \
+            --connection-string "$AZURE_STORAGE_CONNECTION_STRING" \
+            --container-name '$web' \
+            --file dashboard/data.js \
+            --name data.js \
+            --content-type application/javascript \
+            --overwrite
+
+      - name: Print URL
+        run: echo "Dashboard disponible en https://hackathondeuna2026.z21.web.core.windows.net/"

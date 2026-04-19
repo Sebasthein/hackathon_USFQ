@@ -1,4 +1,4 @@
-// RAW_DATA is injected by data.js (no server required)
+// RAW_DATA injected by data.js — real XGBoost predictions (5,000 stratified sample from 64,374)
 
 const ACCIONES = {
     Alto_Declive: 'Ofrecer Crédito Pichincha',
@@ -16,35 +16,22 @@ const SEMAFORO_COLOR = {
 
 const RIESGO_ORDEN = { Alto_Declive: 0, Alto_Inactivo: 1, Medio: 2, Bajo: 3 };
 
-const TIPO_MAP = {
-    'Restaurante / Comida': 'Restaurante',
-    'Supermercado / Abarrotes': 'Supermercado',
-    'Salud / Farmacia': 'Farmacia',
-    'Retail / Tienda': 'Tienda',
-    'Servicios Profesionales': 'Servicios',
-    'Construcción / Ferretería': 'Construcción',
-    'Tecnología': 'Tecnología',
-    'Transporte': 'Transporte',
-    'Educación': 'Educación',
-    'Belleza / Estética': 'Belleza'
-};
-
 function generarMotivo(row) {
-    const r = row.segmento_riesgo;
-    const peakRatio = parseFloat(row.peak_to_current_ratio) || 0;
-    const months = parseInt(row.months_below_avg) || 0;
-    const days = parseInt(row.days_since_last_txn) || 0;
+    const r = row.riesgo;
+    const prob = Math.round(parseFloat(row.porcentaje_xgboost) * 100);
+    const delay = parseInt(row.payment_delay) || 0;
+    const calls = parseInt(row.support_calls) || 0;
+    const freq = parseInt(row.usage_frequency) || 0;
     const ief = parseFloat(row.ief) || 0;
-    const pct = Math.round((1 - peakRatio) * 100);
 
     if (r === 'Alto_Declive') {
-        return `Volumen cayó ${pct}% vs su mejor mes. ${months} mes(es) consecutivos bajo su promedio histórico. IEF: ${ief.toFixed(2)}. Candidato a microcrédito Banco Pichincha.`;
+        return `Prob. abandono: ${prob}%. Retraso de pago: ${delay} días. ${calls} llamada(s) de soporte. IEF: ${ief.toFixed(2)}. Perfil de estrés financiero — candidato a microcrédito Banco Pichincha.`;
     } else if (r === 'Alto_Inactivo') {
-        return `Sin transacciones hace ${days} días. Posible migración a canal alternativo. Acción: campaña de reactivación + soporte proactivo.`;
+        return `Prob. abandono: ${prob}%. Frecuencia de uso: ${freq} transacciones. Sin retraso financiero significativo. Posible migración a canal alternativo — campaña de reactivación.`;
     } else if (r === 'Medio') {
-        return `Señales tempranas de desenganche. Frecuencia descendente en últimos 30 días. Seguimiento preventivo recomendado.`;
+        return `Prob. abandono: ${prob}%. Señales tempranas: retraso ${delay} días, ${calls} soporte(s). Seguimiento preventivo antes de que escale a riesgo alto.`;
     }
-    return `Métricas estables. Sin riesgo inmediato de abandono. Incluir en campaña general de engagement.`;
+    return `Prob. abandono: ${prob}%. Métricas estables. Frecuencia de uso: ${freq} transacciones. Sin riesgo inmediato.`;
 }
 
 function calcularBreaks(volumes) {
@@ -75,28 +62,37 @@ let allData = RAW_DATA.map(r => ({
     nombre: r.usuario,
     ciudad: r.ciudad,
     nivel: r.nivel_deuna,
-    tipo: TIPO_MAP[r.tipo_negocio] || r.tipo_negocio,
-    tipo_raw: r.tipo_negocio,
+    tipo: r.tipo_negocio,
     riesgo: r.segmento_riesgo,
     s_color: SEMAFORO_COLOR[r.segmento_riesgo] || 'green',
     accion: ACCIONES[r.segmento_riesgo] || 'Monitoreo Pasivo',
-    razon: generarMotivo(r),
+    razon: generarMotivo({
+        riesgo: r.segmento_riesgo,
+        porcentaje_xgboost: r.porcentaje_xgboost,
+        payment_delay: r.payment_delay,
+        support_calls: r.support_calls,
+        usage_frequency: r.usage_frequency,
+        ief: r.ief
+    }),
     quintil: asignarQuintil(parseFloat(r.total_volume_last30) || 0, breaks),
     cac: parseFloat(r.cac) || 0,
     coc: parseFloat(r.costo_mantenimiento_mensual) || 0,
     revenue: parseFloat(r.revenue_mensual) || 0,
     ief: parseFloat(r.ief) || 0,
     churned: parseInt(r.churned_next30) || 0,
+    ganancia: parseFloat(r.ganancia) || 0,
+    tenure: parseFloat(r.tenure) || 0,
     lat: parseFloat(r.latitud),
     lng: parseFloat(r.longitud),
     num_quejas: parseInt(r.num_quejas) || 0,
-    volume_last30: parseFloat(r.total_volume_last30) || 0
+    volume_last30: parseFloat(r.total_volume_last30) || 0,
+    prob: parseFloat(r.porcentaje_xgboost) || 0
 }));
 
-// Sort: risk priority first, then IEF descending
+// Sort: risk priority first, then churn probability descending
 allData.sort((a, b) => {
     const d = RIESGO_ORDEN[a.riesgo] - RIESGO_ORDEN[b.riesgo];
-    return d !== 0 ? d : b.ief - a.ief;
+    return d !== 0 ? d : b.prob - a.prob;
 });
 
 let activeFilters = { nivel: 'all', negocio: 'all', riesgo: 'all', ciudad: 'all' };
@@ -114,10 +110,15 @@ function updateKPIs(data) {
     const realChurn = (data.filter(r => r.churned === 1).length / data.length * 100).toFixed(1);
     const predChurn = (data.filter(r => r.riesgo === 'Alto_Declive' || r.riesgo === 'Alto_Inactivo').length / data.length * 100).toFixed(1);
 
+    const avgGanancia = (data.reduce((s, r) => s + r.ganancia, 0) / data.length).toFixed(2);
+    const avgTenure = Math.round(data.reduce((s, r) => s + r.tenure, 0) / data.length);
+
     document.getElementById('kpi-cac').innerText = `${avgCac} USD`;
     document.getElementById('kpi-coc').innerText = `${avgCoc} USD`;
     document.getElementById('kpi-real-churn').innerText = `${realChurn} %`;
     document.getElementById('kpi-pred-churn').innerText = `${predChurn} %`;
+    document.getElementById('kpi-ganancia').innerText = `${avgGanancia} USD`;
+    document.getElementById('kpi-tenure').innerText = `${avgTenure} meses`;
 }
 
 // ── Table ─────────────────────────────────────────────────────────────────────
@@ -140,10 +141,11 @@ function renderTable(data, resetPage = true) {
     slice.forEach(item => {
         const riesgoTexto = item.riesgo.replace('_', ' – ');
         const riskClass = item.riesgo.startsWith('Alto') ? 'alto' : (item.riesgo === 'Medio' ? 'medio' : 'bajo');
+        const probPct = Math.round(item.prob * 100);
         tbody.innerHTML += `
             <tr>
                 <td><div class="badge ${item.s_color}" title="${riesgoTexto}"></div></td>
-                <td><strong>${item.nombre}</strong><br><small style="color:#888;">${item.quintil}</small></td>
+                <td><strong>${item.nombre}</strong><br><small style="color:#888;">${item.quintil} · ${probPct}% prob.</small></td>
                 <td>${item.ciudad}</td>
                 <td>${item.nivel}</td>
                 <td>
@@ -155,7 +157,7 @@ function renderTable(data, resetPage = true) {
             </tr>`;
     });
 
-    document.getElementById('results-count').innerText = `Mostrando ${data.length} comercio(s) totales`;
+    document.getElementById('results-count').innerText = `Mostrando ${data.length} comercio(s)`;
     renderPagination(data.length, totalPages);
 }
 
@@ -211,6 +213,8 @@ const citySelect = document.getElementById('city-select');
 if (citySelect) citySelect.addEventListener('change', e => { activeFilters.ciudad = e.target.value; applyFilters(); });
 
 // ── Charts ────────────────────────────────────────────────────────────────────
+const CHART_TIPOS = ['Tienda', 'Farmacia', 'Ferreteria', 'Restaurante', 'Otros'];
+
 function getQuintilData(data) {
     const sums = { 'Quintil 1': 0, 'Quintil 2': 0, 'Quintil 3': 0, 'Quintil 4': 0, 'Quintil 5': 0 };
     const counts = { ...sums };
@@ -219,8 +223,6 @@ function getQuintilData(data) {
         counts[q] ? Math.round(sums[q] / counts[q]) : 0
     );
 }
-
-const CHART_TIPOS = ['Restaurante', 'Supermercado', 'Farmacia', 'Tienda', 'Servicios', 'Construcción', 'Tecnología', 'Transporte', 'Educación', 'Belleza'];
 
 function getQuejasByTipo(data) {
     const counts = Object.fromEntries(CHART_TIPOS.map(t => [t, 0]));
@@ -242,7 +244,7 @@ function initCharts() {
         data: {
             labels: ['Quintil 1', 'Quintil 2', 'Quintil 3', 'Quintil 4', 'Quintil 5'],
             datasets: [{
-                label: 'Vol. Promedio ($)',
+                label: 'Gasto Promedio ($)',
                 data: [0, 0, 0, 0, 0],
                 backgroundColor: ['#3a285c', '#57447d', '#7a5fa0', '#9e84c0', '#c4aadf'],
                 borderRadius: 4
@@ -263,7 +265,7 @@ function initCharts() {
             labels: CHART_TIPOS,
             datasets: [{
                 data: CHART_TIPOS.map(() => 0),
-                backgroundColor: ['#3a285c','#57447d','#00c49a','#5bc483','#7a5fa0','#9e84c0','#c4aadf','#d4e8e0','#e8c4d4','#a7a7a7'],
+                backgroundColor: ['#3a285c', '#57447d', '#00c49a', '#5bc483', '#a7a7a7'],
                 borderWidth: 1,
                 borderColor: '#ffffff'
             }]
@@ -273,9 +275,7 @@ function initCharts() {
             maintainAspectRatio: false,
             plugins: {
                 legend: { position: 'right' },
-                tooltip: {
-                    callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} quejas` }
-                }
+                tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} quejas` } }
             },
             onClick: (_event, elements) => {
                 if (!elements.length) return;
@@ -292,7 +292,7 @@ function initCharts() {
 
 // ── Map ───────────────────────────────────────────────────────────────────────
 function initMap() {
-    mapInstance = L.map('heatmap', { zoomControl: true, attributionControl: false }).setView([-1.8312, -78.1834], 6);
+    mapInstance = L.map('heatmap', { zoomControl: true, attributionControl: false }).setView([-1.4, -78.8], 7);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 12 }).addTo(mapInstance);
 }
 
@@ -301,17 +301,25 @@ function updateMapMarkers(data) {
     mapMarkers.forEach(m => mapInstance.removeLayer(m));
     mapMarkers = [];
 
-    data.forEach(item => {
+    // Limit map markers to 2000 for performance
+    const display = data.length > 2000
+        ? [...data].sort((a,b) => b.prob - a.prob).slice(0, 2000)
+        : data;
+
+    display.forEach(item => {
         if (isNaN(item.lat) || isNaN(item.lng)) return;
         const isHigh = item.riesgo.startsWith('Alto');
         const color = isHigh ? '#e53e3e' : (item.riesgo === 'Medio' ? '#d69e2e' : '#00c49a');
         const marker = L.circleMarker([item.lat, item.lng], {
-            radius: isHigh ? 6 : 4,
+            radius: isHigh ? 5 : 3,
             fillColor: color,
             color: '#fff',
-            weight: 0.8,
-            fillOpacity: 0.85
-        }).bindTooltip(`<strong>${item.nombre}</strong><br>${item.ciudad} · ${item.riesgo.replace('_', ' ')}`, { direction: 'top' });
+            weight: 0.5,
+            fillOpacity: 0.8
+        }).bindTooltip(
+            `<strong>${item.nombre}</strong><br>${item.ciudad} · ${Math.round(item.prob*100)}% prob.<br>${item.riesgo.replace('_',' ')}`,
+            { direction: 'top' }
+        );
         marker.addTo(mapInstance);
         mapMarkers.push(marker);
     });
