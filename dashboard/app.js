@@ -105,16 +105,15 @@ let mapMarkers = [];
 // ── KPIs ──────────────────────────────────────────────────────────────────────
 function updateKPIs(data) {
     if (!data.length) return;
-    const avgCac = (data.reduce((s, r) => s + r.cac, 0) / data.length).toFixed(1);
-    const avgCoc = (data.reduce((s, r) => s + r.coc, 0) / data.length).toFixed(1);
     const realChurn = (data.filter(r => r.churned === 1).length / data.length * 100).toFixed(1);
     const predChurn = (data.filter(r => r.riesgo === 'Alto_Declive' || r.riesgo === 'Alto_Inactivo').length / data.length * 100).toFixed(1);
 
     const avgGanancia = (data.reduce((s, r) => s + r.ganancia, 0) / data.length).toFixed(2);
     const avgTenure = Math.round(data.reduce((s, r) => s + r.tenure, 0) / data.length);
 
-    document.getElementById('kpi-cac').innerText = `${avgCac} USD`;
-    document.getElementById('kpi-coc').innerText = `${avgCoc} USD`;
+    // Fijar estáticamente los valores de CAC y COC que varíen según requerimiento
+    document.getElementById('kpi-cac').innerText = `6.7 USD`;
+    document.getElementById('kpi-coc').innerText = `10 USD`;
     document.getElementById('kpi-real-churn').innerText = `${realChurn} %`;
     document.getElementById('kpi-pred-churn').innerText = `${predChurn} %`;
     document.getElementById('kpi-ganancia').innerText = `${avgGanancia} USD`;
