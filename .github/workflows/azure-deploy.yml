@@ -24,12 +24,12 @@ jobs:
       - name: Deploy to Azure Web App
         timeout-minutes: 20
         run: |
-          zip -r app.zip . \
-            --exclude '.git/*' \
-            --exclude '**/__pycache__/*' \
-            --exclude '**/*.pyc' \
-            --exclude 'notebooks/*' \
-            --exclude 'data/*'
+          cp requirements-dashboard.txt requirements.txt
+          zip -r app.zip \
+            requirements.txt \
+            startup.sh \
+            dashboard/ \
+            .streamlit/
 
           TOKEN=$(az account get-access-token \
             --resource https://management.azure.com/ \
