@@ -22,6 +22,7 @@ jobs:
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy to Azure Web App
+        timeout-minutes: 20
         run: |
           zip -r app.zip . \
             --exclude '.git/*' \
@@ -29,15 +30,38 @@ jobs:
             --exclude '**/*.pyc' \
             --exclude 'notebooks/*' \
             --exclude 'data/*'
+
           TOKEN=$(az account get-access-token \
             --resource https://management.azure.com/ \
             --query accessToken -o tsv)
+
           HTTP_CODE=$(curl -s -o /tmp/kudu_response.txt -w "%{http_code}" \
+            -D /tmp/kudu_headers.txt \
             -X POST \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/zip" \
             --data-binary @app.zip \
-            "https://hackathon-usfq-app.scm.azurewebsites.net/api/zipdeploy?isAsync=false")
-          echo "HTTP $HTTP_CODE"
+            "https://hackathon-usfq-app.scm.azurewebsites.net/api/zipdeploy?isAsync=true")
+
+          echo "Upload HTTP: $HTTP_CODE"
           cat /tmp/kudu_response.txt
-          if [ "$HTTP_CODE" -ge 400 ]; then exit 1; fi
+
+          if [ "$HTTP_CODE" -eq 202 ]; then
+            POLL_URL=$(grep -i "^location:" /tmp/kudu_headers.txt | tr -d '\r' | awk '{print $2}')
+            echo "Polling deployment status at: $POLL_URL"
+            for i in $(seq 1 24); do
+              sleep 30
+              STATUS=$(curl -s -H "Authorization: Bearer $TOKEN" "$POLL_URL" \
+                | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status',-1))")
+              echo "Check $i/24 — status: $STATUS"
+              if [ "$STATUS" = "4" ]; then echo "Deployment succeeded!"; exit 0; fi
+              if [ "$STATUS" = "3" ]; then echo "Deployment failed!"; exit 1; fi
+            done
+            echo "Timed out waiting for deployment"
+            exit 1
+          elif [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "Deployment done (sync)"
+          else
+            echo "Upload failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
