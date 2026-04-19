@@ -22,7 +22,16 @@ jobs:
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-          package: .
+        run: |
+          zip -r app.zip . \
+            --exclude '.git/*' \
+            --exclude '**/__pycache__/*' \
+            --exclude '**/*.pyc' \
+            --exclude 'notebooks/*' \
+            --exclude 'data/*'
+          az webapp deploy \
+            --resource-group hackathon-usfq-rg \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --src-path app.zip \
+            --type zip \
+            --async false
