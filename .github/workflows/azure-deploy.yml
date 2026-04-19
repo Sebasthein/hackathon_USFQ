@@ -23,19 +23,21 @@ jobs:
 
       - name: Deploy to Azure Web App
         run: |
-          echo "Subscription activa:"
-          az account show --query "{sub:id, name:name}" -o tsv
-          echo "Verificando webapp..."
-          az webapp show --name hackathon-usfq-app --resource-group hackathon-usfq-rg --query name -o tsv
           zip -r app.zip . \
             --exclude '.git/*' \
             --exclude '**/__pycache__/*' \
             --exclude '**/*.pyc' \
             --exclude 'notebooks/*' \
             --exclude 'data/*'
-          az webapp deploy \
-            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
-            --resource-group hackathon-usfq-rg \
-            --name hackathon-usfq-app \
-            --src-path app.zip \
-            --type zip
+          TOKEN=$(az account get-access-token \
+            --resource https://management.azure.com/ \
+            --query accessToken -o tsv)
+          HTTP_CODE=$(curl -s -o /tmp/kudu_response.txt -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/zip" \
+            --data-binary @app.zip \
+            "https://hackathon-usfq-app.scm.azurewebsites.net/api/zipdeploy?isAsync=false")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/kudu_response.txt
+          if [ "$HTTP_CODE" -ge 400 ]; then exit 1; fi
